@@ -65,6 +65,8 @@ class ViewController: UIViewController {
             displayValue = brain.pushOperand(displayValue!)   // push the current number
             record(display.text!)   // log to the history
         }
+        
+        print("\(brain)")
     }
     
     @IBAction func saveVariable(sender: UIButton) {
@@ -91,11 +93,8 @@ class ViewController: UIViewController {
             record(operation)   // log the operation to the history
             record("=") // log an '=' to show that an operation was evaluated
             
-            if let result = brain.performOperation(operation) { // perform the operation and get the result
-                displayValue = result
-            } else {
-                displayValue = nil    // default for invalid results
-            }
+            displayValue = brain.performOperation(operation) // perform the operation and get the result
+            print("\(brain)")
             
             record(display.text!)
         }
@@ -103,7 +102,8 @@ class ViewController: UIViewController {
     
     // log a string to the history on a new line
     func record(thisPieceOfHistory: String) {
-         history.text = history.text! + "\n\(thisPieceOfHistory)"
+        history.text = history.text! + "\n\(brain) ="
+//         history.text = history.text! + "\n\(thisPieceOfHistory)"
     }
     
     // reset to initial settings

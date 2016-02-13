@@ -8,11 +8,27 @@
 
 import Foundation
 
-class CalculatorBrain
+class CalculatorBrain : CustomStringConvertible
 {
     private var opStack = [Op]()    // Stack of Ops, where Ops are operands or operations
     private var knownOps = [String:Op]()    // Dictionary of operation symbol to operation function used by calculator
     private var variables = [String: Double?]() // Dictionary of variables
+    
+    var description: String {
+        var lastCompletedExpressionIndex = opStack.count
+        var result: String = ""
+        while lastCompletedExpressionIndex > 0 {
+            let temp = opStack
+            let temp2: Array<Op> = Array(temp[0..<lastCompletedExpressionIndex])
+            let desc = description(temp2)
+            lastCompletedExpressionIndex = desc.index
+            if let descResult = desc.result {
+                result = descResult + ", " + result
+            }
+        }
+
+        return String(result.characters.dropLast(2))
+    }
     
     var program: AnyObject {    // guarunteed to be a PropertyList
         get {
@@ -42,7 +58,11 @@ class CalculatorBrain
             get {
                 switch self {
                 case .Operand(let operand):
-                    return "\(operand)"
+                    if operand%1 == 0 && operand < Double(Int.max) {    // it is an integer so we don't want to display decimal points, which is a default for doubles
+                        return "\(Int(operand))"  // hopefully all doubles can be converted properly to ints
+                    } else {
+                        return "\(operand)"
+                    }
                 case .UnaryOperation(let symbol, _):
                     return symbol
                 case .BinaryOperation(let symbol, _):
@@ -108,6 +128,38 @@ class CalculatorBrain
     // helper function for evaluate
     func evaluate() -> Double? {
         return evaluate(opStack).result
+    }
+    
+    private func description(ops: [Op]) -> (result: String?, remainingOps: [Op], index: Int) {
+        if !ops.isEmpty {
+            var remainingOps = ops
+            
+            let op = remainingOps.removeLast()
+            
+            switch op {
+            case .Operand(_): // operand
+                return ("\(op)", remainingOps, remainingOps.count)
+            case .UnaryOperation(_, _): // unary operator
+                let operandEvaluation = description(remainingOps)  // recursively get the operand for the operator
+                if let operand = operandEvaluation.result { // make sure it had a valid result
+                    let result = "\(op)(" + operand + ")"
+                    return (result, operandEvaluation.remainingOps, operandEvaluation.index) // operate on the operand
+                }
+            case .BinaryOperation(_, _):    // binary operator
+                let operandEvaluation = description(remainingOps)
+                if let operand = operandEvaluation.result {
+                    let operandEvaluation2 = description(operandEvaluation.remainingOps)
+                    if let operand2 = operandEvaluation2.result {
+                        let result = "(" + operand2 + " \(op) " + operand + ")"
+                        return (result, operandEvaluation2.remainingOps, operandEvaluation2.index)
+                    }
+                }
+            case .ConstantOrVariable(_, _):   // constants and variables
+                return ("\(op)", remainingOps, remainingOps.count)
+            }
+        }
+        
+        return (nil,ops, 0)
     }
     
     // recursive evaluate function
