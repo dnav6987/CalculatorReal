@@ -10,25 +10,9 @@ import Foundation
 
 class CalculatorBrain : CustomStringConvertible
 {
-    private var opStack = [Op]()    // Stack of Ops, where Ops are operands or operations
+    private var opStack = [Op]()    // Stack of Ops, where Ops are operands and operations
     private var knownOps = [String:Op]()    // Dictionary of operation symbol to operation function used by calculator
-    private var variables = [String: Double?]() // Dictionary of variables
-    
-    var description: String {
-        var lastCompletedExpressionIndex = opStack.count
-        var result: String = ""
-        while lastCompletedExpressionIndex > 0 {
-            let temp = opStack
-            let temp2: Array<Op> = Array(temp[0..<lastCompletedExpressionIndex])
-            let desc = description(temp2)
-            lastCompletedExpressionIndex = desc.index
-            if let descResult = desc.result {
-                result = descResult + ", " + result
-            }
-        }
-
-        return String(result.characters.dropLast(2))
-    }
+    private var variables = [String: Double?]() // Dictionary of variables to their values
     
     var program: AnyObject {    // guarunteed to be a PropertyList
         get {
@@ -48,18 +32,36 @@ class CalculatorBrain : CustomStringConvertible
         }
     }
     
-    private enum Op : CustomStringConvertible {
-        case Operand(Double)    // Operands are just digits for now
+    // set the knownOps
+    init() {
+        func learnOp(op: Op) {  // alternate way of adding on Op, not used in this project
+            knownOps[op.description] = op
+        }
+        
+        knownOps["×"] = Op.BinaryOperation("×", *)
+        knownOps["÷"] = Op.BinaryOperation("÷") {$1 / $0}
+        knownOps["+"] = Op.BinaryOperation("+", +)
+        knownOps["-"] = Op.BinaryOperation("-") {$1 - $0}
+        knownOps["√"] = Op.UnaryOperation("√", sqrt)
+        knownOps["sin"] = Op.UnaryOperation("sin", sin)
+        knownOps["cos"] = Op.UnaryOperation("cos", cos)
+        knownOps["π"] = Op.ConstantOrVariable("π", M_PI)
+    }
+    
+    private enum Op : CustomStringConvertible { // What we save to the opStack. operands and operations
+        case Operand(Double)    // Operands are just numbers
         case UnaryOperation(String, Double -> Double)   // unary operations
         case BinaryOperation(String, (Double, Double) -> Double)    // binary operations
-        case ConstantOrVariable(String, Double?)    // constants and variables can just be replaced by their number so group together
+        case ConstantOrVariable(String, Double?)    // constant and variable symbols can just be replaced by their number so they are grouped together
         
-        var description: String {
+        var description: String {   // how to describe Op as a String
             get {
                 switch self {
                 case .Operand(let operand):
-                    if operand%1 == 0 && operand < Double(Int.max) {    // it is an integer so we don't want to display decimal points, which is a default for doubles
-                        return "\(Int(operand))"  // hopefully all doubles can be converted properly to ints
+                    // for integers we don't want to display decimal points, which is a default for doubles. Only convert to Int however,
+                    // if the double can be casted to an Int (i.e. it is less than Int.max)
+                    if operand%1 == 0 && operand < Double(Int.max) {
+                        return "\(Int(operand))"
                     } else {
                         return "\(operand)"
                     }
@@ -72,28 +74,25 @@ class CalculatorBrain : CustomStringConvertible
                 }
             }
         }
-    }
-    
-    // initialize the dictionaries
-    init() {
-        func learnOp(op: Op) {  // alternate way of adding on Op, not used in this project
-            knownOps[op.description] = op
+        
+        var precedence: Int {   // order of operations. for deciding where to add parenthesis
+            get {
+                switch self {
+                case .Operand(_):
+                    return Int.max
+                case .UnaryOperation(_, _): // lowest priorty because they will by defualt provide parenthesis and we don't want redundant parenthesis
+                    return 0
+                case .BinaryOperation(let symbol, _):   // + and - are the lowest
+                    if symbol == "+" || symbol == "-" {
+                        return 0
+                    }
+                    return 1    // but x and / are only one higher
+                case .ConstantOrVariable(_, _):
+                    return Int.max
+                }
+            }
         }
-
-        knownOps["×"] = Op.BinaryOperation("×", *)
-        knownOps["÷"] = Op.BinaryOperation("÷") {$1 / $0}
-        knownOps["+"] = Op.BinaryOperation("+", +)
-        knownOps["-"] = Op.BinaryOperation("-") {$1 - $0}
-        knownOps["√"] = Op.UnaryOperation("√", sqrt)
-        knownOps["sin"] = Op.UnaryOperation("sin", sin)
-        knownOps["cos"] = Op.UnaryOperation("cos", cos)
-        knownOps["π"] = Op.ConstantOrVariable("π", M_PI)
-    }
-    
-    // clear the opstack
-    func clear() {
-        opStack = [Op]()
-        variables = [String: Double?]()
+        
     }
     
     // push an operand (number) onto the stack and evaluate the result
@@ -112,8 +111,10 @@ class CalculatorBrain : CustomStringConvertible
         return evaluate()
     }
     
-    func setVariable(variable: String, value: Double?) {
+    // save a variable and evaluate the opStack with this new value
+    func setVariable(variable: String, value: Double?) -> Double? {
         variables[variable] = value
+        return evaluate()
     }
     
     // push the operator onto the stack and evaluate
@@ -125,48 +126,71 @@ class CalculatorBrain : CustomStringConvertible
         return nil  // invalid operation
     }
     
-    // helper function for evaluate
-    func evaluate() -> Double? {
-        return evaluate(opStack).result
+    // how to represent a CalculatorBrain as a String. Want to make sure we show the entire stack, all the way to the bottom
+    // but description can only return the last expression on the stack we keep calling descrition until each expression
+    // is included
+    var description: String {
+        var lastCompletedExpressionIndex = opStack.count    // Index of the bottom most Op in opStack of the last expression
+        var result: String = "" // we will append expressions to this
+        while lastCompletedExpressionIndex > 0 {    // until the expressions are all included
+            let ops = opStack  // make a copy
+            let remainingExpressions: Array<Op> = Array(ops[0..<lastCompletedExpressionIndex])  // sub array of opStack that does not include already done expressions
+            let desc = description(remainingExpressions, currentPrecedence: 0)
+            lastCompletedExpressionIndex = desc.index
+            result = desc.result + ", " + result    // separate expressions with commas
+        }
+        
+        return String(result.characters.dropLast(2))    // remove the unnecessary comma after the most recent expression
     }
     
-    private func description(ops: [Op]) -> (result: String?, remainingOps: [Op], index: Int) {
+    // clear the opstack
+    func clear() {
+        opStack = [Op]()
+        variables = [String: Double?]()
+    }
+
+    // recursive function to describe the top expressions on the Stack. It takes as parameters an Op Stack and the
+    // current precedence. If a higher precedence operation calls a lower one, than the lower precedence operation needs
+    // parenthesis.
+    private func description(ops: [Op], currentPrecedence: Int) -> (result: String, remainingOps: [Op], index: Int) {
         if !ops.isEmpty {
-            var remainingOps = ops
-            
-            let op = remainingOps.removeLast()
+            var remainingOps = ops  // make a copy
+            let op = remainingOps.removeLast()  // pop
             
             switch op {
             case .Operand(_): // operand
                 return ("\(op)", remainingOps, remainingOps.count)
             case .UnaryOperation(_, _): // unary operator
-                let operandEvaluation = description(remainingOps)  // recursively get the operand for the operator
-                if let operand = operandEvaluation.result { // make sure it had a valid result
-                    let result = "\(op)(" + operand + ")"
-                    return (result, operandEvaluation.remainingOps, operandEvaluation.index) // operate on the operand
-                }
+                let operandEvaluation = description(remainingOps, currentPrecedence: op.precedence)  // recursively get the operand for the operator
+                let result = "\(op)(" + operandEvaluation.result + ")"  // always surround operand with parenthesis
+                return (result, operandEvaluation.remainingOps, operandEvaluation.index)
             case .BinaryOperation(_, _):    // binary operator
-                let operandEvaluation = description(remainingOps)
-                if let operand = operandEvaluation.result {
-                    let operandEvaluation2 = description(operandEvaluation.remainingOps)
-                    if let operand2 = operandEvaluation2.result {
-                        let result = "(" + operand2 + " \(op) " + operand + ")"
-                        return (result, operandEvaluation2.remainingOps, operandEvaluation2.index)
-                    }
+                let operandEvaluation = description(remainingOps, currentPrecedence: op.precedence) // first operand
+                let operandEvaluation2 = description(operandEvaluation.remainingOps, currentPrecedence: op.precedence)  // second operand
+                var result = ""
+                if op.precedence < currentPrecedence {  // only surround with parenthesis if inside a high order function
+                    result = "(" + operandEvaluation2.result + " \(op) " + operandEvaluation.result + ")"
+                } else {
+                    result = operandEvaluation2.result + " \(op) " + operandEvaluation.result
                 }
+                return (result, operandEvaluation2.remainingOps, operandEvaluation2.index)
             case .ConstantOrVariable(_, _):   // constants and variables
                 return ("\(op)", remainingOps, remainingOps.count)
             }
         }
         
-        return (nil,ops, 0)
+        return ("?",ops, 0)
+    }
+    
+    // helper function for evaluate
+    func evaluate() -> Double? {
+        return evaluate(opStack).result
     }
     
     // recursive evaluate function
     private func evaluate(ops: [Op]) -> (result: Double?, remainingOps: [Op]) {
         if !ops.isEmpty {   // base case, cannot operate on nothing
             var remainingOps = ops  // make a copy so we can change it
-            
             let op = remainingOps.removeLast()
             
             switch op {
